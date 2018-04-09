@@ -14,8 +14,12 @@ def get_record_parser(config, is_test=False):
                                            features={
                                                "context_idxs": tf.FixedLenFeature([], tf.string),
                                                "context_pos_idxs": tf.FixedLenFeature([], tf.string),
+                                               "context_ner_idxs": tf.FixedLenFeature([], tf.string),
+                                               "context_match_idxs": tf.FixedLenFeature([], tf.string),
                                                "ques_idxs": tf.FixedLenFeature([], tf.string),
                                                "ques_pos_idxs": tf.FixedLenFeature([], tf.string),
+                                               "ques_ner_idxs": tf.FixedLenFeature([], tf.string),
+                                               "ques_match_idxs": tf.FixedLenFeature([], tf.string),
                                                "context_char_idxs": tf.FixedLenFeature([], tf.string),
                                                "ques_char_idxs": tf.FixedLenFeature([], tf.string),
                                                "y1": tf.FixedLenFeature([], tf.string),
@@ -26,10 +30,18 @@ def get_record_parser(config, is_test=False):
             features["context_idxs"], tf.int32), [para_limit])
         context_pos_idxs = tf.reshape(tf.decode_raw(
             features["context_pos_idxs"], tf.int32), [para_limit])
+        context_ner_idxs = tf.reshape(tf.decode_raw(
+            features["context_ner_idxs"], tf.int32), [para_limit])
+        context_match_idxs = tf.reshape(tf.decode_raw(
+            features["context_match_idxs"], tf.int32), [para_limit])
         ques_idxs = tf.reshape(tf.decode_raw(
             features["ques_idxs"], tf.int32), [ques_limit])
         ques_pos_idxs = tf.reshape(tf.decode_raw(
             features["ques_pos_idxs"], tf.int32), [ques_limit])
+        ques_ner_idxs = tf.reshape(tf.decode_raw(
+            features["ques_ner_idxs"], tf.int32), [ques_limit])
+        ques_match_idxs = tf.reshape(tf.decode_raw(
+            features["ques_match_idxs"], tf.int32), [ques_limit])
         context_char_idxs = tf.reshape(tf.decode_raw(
             features["context_char_idxs"], tf.int32), [para_limit, char_limit])
         ques_char_idxs = tf.reshape(tf.decode_raw(
@@ -39,7 +51,9 @@ def get_record_parser(config, is_test=False):
         y2 = tf.reshape(tf.decode_raw(
             features["y2"], tf.float32), [para_limit])
         qa_id = features["id"]
-        return context_idxs, context_pos_idxs, ques_idxs, ques_pos_idxs, context_char_idxs, ques_char_idxs, y1, y2, qa_id
+        return context_idxs, context_pos_idxs, context_ner_idxs, context_match_idxs, \
+               ques_idxs, ques_pos_idxs, ques_ner_idxs, ques_match_idxs, \
+               context_char_idxs, ques_char_idxs, y1, y2, qa_id
     return parse
 
 

@@ -7,7 +7,9 @@ class Model(object):
         self.config = config
         self.global_step = tf.get_variable('global_step', shape=[], dtype=tf.int32,
                                            initializer=tf.constant_initializer(0), trainable=False)
-        self.c, self.cp, self.q, self.qp, self.ch, self.qh, self.y1, self.y2, self.qa_id = batch.get_next()
+        self.c, self.cp, self.cn, self.cm, \
+        self.q, self.qp, self.qn, self.qm, \
+        self.ch, self.qh, self.y1, self.y2, self.qa_id = batch.get_next()
         self.is_train = tf.get_variable(
             "is_train", shape=[], dtype=tf.bool, trainable=False)
         self.word_mat = tf.get_variable("word_mat", initializer=tf.constant(
@@ -25,9 +27,13 @@ class Model(object):
             self.c_maxlen = tf.reduce_max(self.c_len)
             self.q_maxlen = tf.reduce_max(self.q_len)
             self.c = tf.slice(self.c, [0, 0], [N, self.c_maxlen])
-            self.cp = tf.slice(self.c, [0, 0], [N, self.c_maxlen])
+            self.cp = tf.slice(self.cp, [0, 0], [N, self.c_maxlen])
+            self.cn = tf.slice(self.cn, [0, 0], [N, self.c_maxlen])
+            self.cm = tf.slice(self.cm, [0, 0], [N, self.c_maxlen])
             self.q = tf.slice(self.q, [0, 0], [N, self.q_maxlen])
-            self.qp = tf.slice(self.q, [0, 0], [N, self.q_maxlen])
+            self.qp = tf.slice(self.qp, [0, 0], [N, self.q_maxlen])
+            self.qn = tf.slice(self.qn, [0, 0], [N, self.q_maxlen])
+            self.qm = tf.slice(self.qm, [0, 0], [N, self.q_maxlen])
             self.c_mask = tf.slice(self.c_mask, [0, 0], [N, self.c_maxlen])
             self.q_mask = tf.slice(self.q_mask, [0, 0], [N, self.q_maxlen])
             self.ch = tf.slice(self.ch, [0, 0, 0], [N, self.c_maxlen, CL])
@@ -90,8 +96,28 @@ class Model(object):
                 cp_emb = tf.one_hot(self.cp, 44)
                 qp_emb = tf.one_hot(self.qp, 44)
 
-            c_emb = tf.concat([c_emb, ch_emb, cp_emb], axis=2)
-            q_emb = tf.concat([q_emb, qh_emb, qp_emb], axis=2)
+            with tf.name_scope("ner"):
+                cn_emb = tf.one_hot(self.cn, 8)
+                qn_emb = tf.one_hot(self.qn, 8)
+
+            with tf.name_scope("match"):
+                cm_emb = tf.reshape(self.cm, [N, -1, 1])
+                qm_emb = tf.reshape(self.qm, [N, -1, 1])
+
+            c_emb = tf.concat([c_emb, ch_emb], axis=2)
+            q_emb = tf.concat([q_emb, qh_emb], axis=2)
+
+            if config.use_pos:
+                c_emb = tf.concat([c_emb, cp_emb], axis=2)
+                q_emb = tf.concat([q_emb, qp_emb], axis=2)
+
+            if config.use_ner:
+                c_emb = tf.concat([c_emb, cn_emb], axis=2)
+                q_emb = tf.concat([q_emb, qn_emb], axis=2)
+
+            if config.use_match:
+                c_emb = tf.concat([c_emb, cm_emb], axis=2)
+                q_emb = tf.concat([q_emb, qm_emb], axis=2)
 
         with tf.variable_scope("encoding"):
             rnn = gru(num_layers=3, num_units=d, batch_size=N, input_size=c_emb.get_shape(

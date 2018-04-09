@@ -98,6 +98,10 @@ flags.DEFINE_integer("hidden", 75, "Hidden size")
 flags.DEFINE_integer("char_hidden", 100, "GRU dim for char")
 flags.DEFINE_integer("patience", 3, "Patience for lr decay")
 
+flags.DEFINE_boolean("use_pos", True, "Whether to use pos tag embedding")
+flags.DEFINE_boolean("use_ner", False, "Whether to use ner tag embedding")
+flags.DEFINE_boolean("use_match", False, "Whether to use match tag embedding")
+
 # Extensions (Uncomment corresponding line in download.sh to download the required data)
 glove_char_file = os.path.join(
     home, "data", "glove", "glove.840B.300d-char.txt")

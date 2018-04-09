@@ -29,8 +29,42 @@ def convert_idx(text, tokens):
     return spans
 
 
+class NERClassifier(object):
+    def __init__(self):
+        import os
+        os.environ['JAVA_HOME'] = '/Library/Java/JavaVirtualMachines/jdk1.8.0_162.jdk/Contents/Home'
+        os.environ['CLASSPATH'] = 'stanford-ner.jar'
+        from jnius import autoclass
+        CRFClassifier = autoclass('edu.stanford.nlp.ie.crf.CRFClassifier')
+        serializedClassifier = 'classifiers/english.muc.7class.distsim.crf.ser.gz'
+        # serializedClassifier = 'classifiers/english.all.3class.distsim.crf.ser.gz'
+
+        self.classifier = CRFClassifier.getClassifier(serializedClassifier)
+        self.sen_util = autoclass('edu.stanford.nlp.ling.SentenceUtils')
+        self.ner2idx_dict = {
+            'O': 0,
+            'LOCATION': 1,
+            'PERSON': 2,
+            'ORGANIZATION': 3,
+            'MONEY': 4,
+            'PERCENT': 5,
+            'DATE': 6,
+            'TIME': 7
+        }
+
+    def classify(self, tokens):
+        token_list = self.sen_util.toCoreLabelList(*tokens)
+        out = self.classifier.classifySentence(token_list)
+
+        ret = []
+        for token in out.toArray():
+            ret.append(self.ner2idx_dict[token.toShorterString('Answer')[8:-1]])
+        return ret
+
+
 def process_file(filename, data_type, word_counter, char_counter, pos2idx_dict):
     print("Generating {} examples...".format(data_type))
+    classifier = NERClassifier()
     examples = []
     eval_examples = {}
     total = 0
@@ -43,6 +77,8 @@ def process_file(filename, data_type, word_counter, char_counter, pos2idx_dict):
                 context_tokens = word_tokenize(context)
                 context_pos = [pos2idx_dict[tag] if tag in pos2idx_dict else 0
                                for _, tag in nltk.pos_tag(context_tokens)]
+                context_ner = classifier.classify(context_tokens)
+                assert len(context_ner) == len(context_tokens)
                 context_chars = [list(token) for token in context_tokens]
                 spans = convert_idx(context, context_tokens)
                 for token in context_tokens:
@@ -55,7 +91,9 @@ def process_file(filename, data_type, word_counter, char_counter, pos2idx_dict):
                         "''", '" ').replace("``", '" ')
                     ques_tokens = word_tokenize(ques)
                     ques_pos = [pos2idx_dict[tag] if tag in pos2idx_dict else 0
-                                   for _, tag in nltk.pos_tag(ques_tokens)]
+                                for _, tag in nltk.pos_tag(ques_tokens)]
+                    ques_ner = classifier.classify(ques_tokens)
+                    assert len(ques_ner) == len(ques_tokens)
                     ques_chars = [list(token) for token in ques_tokens]
                     for token in ques_tokens:
                         word_counter[token] += 1
@@ -75,9 +113,16 @@ def process_file(filename, data_type, word_counter, char_counter, pos2idx_dict):
                         y1, y2 = answer_span[0], answer_span[-1]
                         y1s.append(y1)
                         y2s.append(y2)
-                    example = {"context_tokens": context_tokens, "context_chars": context_chars, "ques_tokens": ques_tokens,
+
+                    ques_tokens_set = set(ques_tokens)
+                    context_match = [1 if token in ques_tokens_set else 0 for token in context_tokens]
+                    ques_match = [1 for _ in range(len(ques_tokens))]
+                    example = {"context_tokens": context_tokens, "context_chars": context_chars,
+                               "ques_tokens": ques_tokens,
                                "ques_chars": ques_chars, "y1s": y1s, "y2s": y2s, "id": total,
-                               "context_pos": context_pos, "ques_pos": ques_pos}
+                               "context_pos": context_pos, "ques_pos": ques_pos,
+                               "context_ner": context_ner, "ques_ner": ques_ner,
+                               "context_match": context_match, "ques_match": ques_match}
                     examples.append(example)
                     eval_examples[str(total)] = {
                         "context": context, "spans": spans, "answers": answer_texts, "uuid": qa["id"]}
@@ -125,7 +170,6 @@ def get_embedding(counter, data_type, limit=-1, emb_file=None, size=None, vec_si
 
 
 def build_features(config, examples, data_type, out_file, word2idx_dict, char2idx_dict, is_test=False):
-
     para_limit = config.test_para_limit if is_test else config.para_limit
     ques_limit = config.test_ques_limit if is_test else config.ques_limit
     char_limit = config.char_limit
@@ -147,9 +191,13 @@ def build_features(config, examples, data_type, out_file, word2idx_dict, char2id
         total += 1
         context_idxs = np.zeros([para_limit], dtype=np.int32)
         context_pos_idxs = np.zeros([para_limit], dtype=np.int32)
+        context_ner_idxs = np.zeros([para_limit], dtype=np.int32)
+        context_match_idxs = np.zeros([para_limit], dtype=np.int32)
         context_char_idxs = np.zeros([para_limit, char_limit], dtype=np.int32)
         ques_idxs = np.zeros([ques_limit], dtype=np.int32)
         ques_pos_idxs = np.zeros([ques_limit], dtype=np.int32)
+        ques_ner_idxs = np.zeros([ques_limit], dtype=np.int32)
+        ques_match_idxs = np.zeros([ques_limit], dtype=np.int32)
         ques_char_idxs = np.zeros([ques_limit, char_limit], dtype=np.int32)
         y1 = np.zeros([para_limit], dtype=np.float32)
         y2 = np.zeros([para_limit], dtype=np.float32)
@@ -168,10 +216,14 @@ def build_features(config, examples, data_type, out_file, word2idx_dict, char2id
         for i, token in enumerate(example["context_tokens"]):
             context_idxs[i] = _get_word(token)
             context_pos_idxs[i] = example["context_pos"][i]
+            context_ner_idxs[i] = example["context_ner"][i]
+            context_match_idxs[i] = example["context_match"][i]
 
         for i, token in enumerate(example["ques_tokens"]):
             ques_idxs[i] = _get_word(token)
             ques_pos_idxs[i] = example["ques_pos"][i]
+            ques_ner_idxs[i] = example["ques_ner"][i]
+            ques_match_idxs[i] = example["ques_match"][i]
 
         for i, token in enumerate(example["context_chars"]):
             for j, char in enumerate(token):
@@ -189,16 +241,20 @@ def build_features(config, examples, data_type, out_file, word2idx_dict, char2id
         y1[start], y2[end] = 1.0, 1.0
 
         record = tf.train.Example(features=tf.train.Features(feature={
-                                  "context_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_idxs.tostring()])),
-                                  "context_pos_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_pos_idxs.tostring()])),
-                                  "ques_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_idxs.tostring()])),
-                                  "ques_pos_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_pos_idxs.tostring()])),
-                                  "context_char_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_char_idxs.tostring()])),
-                                  "ques_char_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_char_idxs.tostring()])),
-                                  "y1": tf.train.Feature(bytes_list=tf.train.BytesList(value=[y1.tostring()])),
-                                  "y2": tf.train.Feature(bytes_list=tf.train.BytesList(value=[y2.tostring()])),
-                                  "id": tf.train.Feature(int64_list=tf.train.Int64List(value=[example["id"]]))
-                                  }))
+            "context_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_idxs.tostring()])),
+            "context_pos_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_pos_idxs.tostring()])),
+            "context_ner_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_ner_idxs.tostring()])),
+            "context_match_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_match_idxs.tostring()])),
+            "ques_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_idxs.tostring()])),
+            "ques_pos_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_pos_idxs.tostring()])),
+            "ques_ner_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_ner_idxs.tostring()])),
+            "ques_match_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_match_idxs.tostring()])),
+            "context_char_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[context_char_idxs.tostring()])),
+            "ques_char_idxs": tf.train.Feature(bytes_list=tf.train.BytesList(value=[ques_char_idxs.tostring()])),
+            "y1": tf.train.Feature(bytes_list=tf.train.BytesList(value=[y1.tostring()])),
+            "y2": tf.train.Feature(bytes_list=tf.train.BytesList(value=[y2.tostring()])),
+            "id": tf.train.Feature(int64_list=tf.train.Int64List(value=[example["id"]]))
+        }))
         writer.write(record.SerializeToString())
     print("Build {} / {} instances of features in total".format(total, total_))
     meta["total"] = total
@@ -255,14 +311,16 @@ def prepro(config):
         with open(config.word2idx_file, "r") as fh:
             word2idx_dict = json.load(fh)
     word_emb_mat, word2idx_dict = get_embedding(word_counter, "word", emb_file=word_emb_file,
-                                                size=config.glove_word_size, vec_size=config.glove_dim, token2idx_dict=word2idx_dict)
+                                                size=config.glove_word_size, vec_size=config.glove_dim,
+                                                token2idx_dict=word2idx_dict)
 
     char2idx_dict = None
     if os.path.isfile(config.char2idx_file):
         with open(config.char2idx_file, "r") as fh:
             char2idx_dict = json.load(fh)
     char_emb_mat, char2idx_dict = get_embedding(
-        char_counter, "char", emb_file=char_emb_file, size=char_emb_size, vec_size=char_emb_dim, token2idx_dict=char2idx_dict)
+        char_counter, "char", emb_file=char_emb_file, size=char_emb_size, vec_size=char_emb_dim,
+        token2idx_dict=char2idx_dict)
 
     build_features(config, train_examples, "train",
                    config.train_record_file, word2idx_dict, char2idx_dict)
