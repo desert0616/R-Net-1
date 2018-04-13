@@ -104,8 +104,9 @@ class Model(object):
                 cm_emb = tf.to_float(tf.reshape(self.cm, [N, -1, 1]))
                 qm_emb = tf.to_float(tf.reshape(self.qm, [N, -1, 1]))
 
-            c_emb = tf.concat([c_emb, ch_emb], axis=2)
-            q_emb = tf.concat([q_emb, qh_emb], axis=2)
+            if config.use_char:
+                c_emb = tf.concat([c_emb, ch_emb], axis=2)
+                q_emb = tf.concat([q_emb, qh_emb], axis=2)
 
             if config.use_pos:
                 c_emb = tf.concat([c_emb, cp_emb], axis=2)

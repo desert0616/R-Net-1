@@ -32,7 +32,7 @@ def convert_idx(text, tokens):
 class NERClassifier(object):
     def __init__(self):
         import os
-        os.environ['JAVA_HOME'] = '/Library/Java/JavaVirtualMachines/jdk1.8.0_162.jdk/Contents/Home'
+        # os.environ['JAVA_HOME'] = '/Library/Java/JavaVirtualMachines/jdk1.8.0_162.jdk/Contents/Home'
         os.environ['CLASSPATH'] = 'stanford-ner.jar'
         from jnius import autoclass
         CRFClassifier = autoclass('edu.stanford.nlp.ie.crf.CRFClassifier')
