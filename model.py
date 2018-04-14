@@ -1,5 +1,5 @@
 import tensorflow as tf
-from func import cudnn_gru, native_gru, dot_attention, summ, dropout, ptr_net
+from func import cudnn_gru, native_gru, dot_attention, summ, dropout, ptr_net, tanh_attention
 
 
 class Model(object):
@@ -127,7 +127,7 @@ class Model(object):
             q = rnn(q_emb, seq_len=self.q_len)
 
         with tf.variable_scope("attention"):
-            qc_att = dot_attention(c, q, mask=self.q_mask, hidden=d,
+            qc_att = tanh_attention(c, q, mask=self.q_mask, hidden=d,
                                    keep_prob=config.keep_prob, is_train=self.is_train)
             rnn = gru(num_layers=1, num_units=d, batch_size=N, input_size=qc_att.get_shape(
             ).as_list()[-1], keep_prob=config.keep_prob, is_train=self.is_train)

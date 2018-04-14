@@ -170,21 +170,78 @@ def summ(memory, hidden, mask, keep_prob=1.0, is_train=None, scope="summ"):
 
 def dot_attention(inputs, memory, mask, hidden, keep_prob=1.0, is_train=None, scope="dot_attention"):
     with tf.variable_scope(scope):
-
+        print('inputs', inputs) # (batch_size, p_len, dim)
+        print('memory', memory) # (batch_size, q_len, dim)
         d_inputs = dropout(inputs, keep_prob=keep_prob, is_train=is_train)
         d_memory = dropout(memory, keep_prob=keep_prob, is_train=is_train)
         JX = tf.shape(inputs)[1]
-
+        
         with tf.variable_scope("attention"):
+            # attention 0: Relu(Wp)*Relu(Wq), same as open domain QA paper
             inputs_ = tf.nn.relu(
                 dense(d_inputs, hidden, use_bias=False, scope="inputs"))
             memory_ = tf.nn.relu(
                 dense(d_memory, hidden, use_bias=False, scope="memory"))
-            outputs = tf.matmul(inputs_, tf.transpose(
-                memory_, [0, 2, 1])) / (hidden ** 0.5)
+            print('inputs_', inputs_)
+            print('memory_', memory_)
+             
+            outputs = tf.matmul(inputs_, tf.transpose(memory_, [0, 2, 1])) / (hidden ** 0.5)
+            print('outputs', outputs)
             mask = tf.tile(tf.expand_dims(mask, axis=1), [1, JX, 1])
-            logits = tf.nn.softmax(softmax_mask(outputs, mask))
-            outputs = tf.matmul(logits, memory)
+
+            logits = tf.nn.softmax(softmax_mask(outputs, mask)) 
+
+            # outputs: text aware question representation for each word in passage (64, p_len, dim)
+            outputs = tf.matmul(logits, memory) 
+            res = tf.concat([inputs, outputs], axis=2)
+
+        with tf.variable_scope("gate"):
+            dim = res.get_shape().as_list()[-1]
+            d_res = dropout(res, keep_prob=keep_prob, is_train=is_train)
+            gate = tf.nn.sigmoid(dense(d_res, dim, use_bias=False))
+            return res * gate
+
+
+def tanh_attention(inputs, memory, mask, hidden, keep_prob=1.0, is_train=None, scope="tanh_attention"):
+    with tf.variable_scope(scope):
+        print('inputs', inputs) # (batch_size, p_len, dim)
+        print('memory', memory) # (batch_size, q_len, dim)
+        d_inputs = dropout(inputs, keep_prob=keep_prob, is_train=is_train)
+        d_memory = dropout(memory, keep_prob=keep_prob, is_train=is_train)
+        JX = tf.shape(inputs)[1]
+        
+        with tf.variable_scope("attention"):
+            inputs_temp = dense(d_inputs, hidden, use_bias=False, scope="inputs")
+            inputs_shape_new = [d_inputs.get_shape().as_list()[0], -1, 1, inputs_temp.get_shape().as_list()[2]]
+            inputs_ = tf.reshape(inputs_temp, inputs_shape_new)
+            print('inputs_', inputs_)
+
+            memory_temp = dense(d_memory, hidden, use_bias=False, scope="memory")
+            memory_shape_new = [d_memory.get_shape().as_list()[0], 1, -1, memory_temp.get_shape().as_list()[2]]            
+            memory_ = tf.reshape(memory_temp, memory_shape_new)
+            print('memory_', memory_)
+            
+            
+            sum_p_q = inputs_ + memory_ #  b, p, q, hidden
+            dot_p_q = tf.expand_dims(tf.matmul(d_inputs, tf.transpose(d_memory, [0, 2, 1])), 3)            
+            dot_p_q = dense(dot_p_q, hidden, use_bias=False, scope="dot") # b, p, q, hidden
+
+            print('sum_p_q: ', sum_p_q)
+            print('dot_p_q: ', dot_p_q)
+            
+            outputs_temp = dense(tf.tanh(sum_p_q+dot_p_q),1, use_bias=False, scope="outputs")            
+            print('temp_outputs', outputs_temp)
+            
+            outputs = tf.squeeze(outputs_temp)
+
+            print('outputs', outputs)
+            
+            mask = tf.tile(tf.expand_dims(mask, axis=1), [1, JX, 1])
+            # logits: attention score (64, p_len, q_len)
+            logits = tf.nn.softmax(softmax_mask(outputs, mask)) 
+
+            # outputs: text aware question representation for each word in passage (64, p_len, dim)
+            outputs = tf.matmul(logits, memory) 
             res = tf.concat([inputs, outputs], axis=2)
 
         with tf.variable_scope("gate"):
